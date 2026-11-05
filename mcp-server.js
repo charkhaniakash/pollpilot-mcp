@@ -100,6 +100,113 @@ function createMCPServer() {
     }
   );
 
+  // Register the list_surveys tool
+  server.registerTool(
+    'list_surveys',
+    {
+      description: 'List all surveys with their id, title, status, and response count.',
+      inputSchema: {},
+    },
+    async () => {
+      try {
+        const surveys = db.listSurveys();
+        
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                surveys: surveys.map(s => ({
+                  id: s.id,
+                  slug: s.slug,
+                  title: s.title,
+                  status: s.status,
+                  response_count: s.response_count,
+                  created_at: s.created_at
+                })),
+                total: surveys.length
+              }, null, 2),
+            },
+          ],
+        };
+      } catch (error) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                error: 'Failed to list surveys',
+                message: error.message
+              }, null, 2),
+            },
+          ],
+          isError: true,
+        };
+      }
+    }
+  );
+
+  // Register the get_survey tool
+  server.registerTool(
+    'get_survey',
+    {
+      description: 'Get full details of a survey including all questions. Provide either survey ID or slug.',
+      inputSchema: {
+        survey_id: z.union([z.string(), z.number()]).describe('Survey ID or slug')
+      },
+    },
+    async ({ survey_id }) => {
+      try {
+        const survey = db.getSurvey(survey_id);
+        
+        if (!survey) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({
+                  error: 'Survey not found',
+                  message: `No survey found with ID or slug: ${survey_id}`
+                }, null, 2),
+              },
+            ],
+            isError: true,
+          };
+        }
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                id: survey.id,
+                slug: survey.slug,
+                title: survey.title,
+                description: survey.description,
+                status: survey.status,
+                created_at: survey.created_at,
+                questions: survey.questions
+              }, null, 2),
+            },
+          ],
+        };
+      } catch (error) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                error: 'Failed to get survey',
+                message: error.message
+              }, null, 2),
+            },
+          ],
+          isError: true,
+        };
+      }
+    }
+  );
+
   return server;
 }
 
