@@ -224,6 +224,7 @@ app.get('/admin', requireAuth, (req, res) => {
           `<a href="${baseUrl}/s/${survey.slug}" target="_blank" class="btn btn-sm btn-secondary">View</a>` : 
           '<span class="btn btn-sm btn-disabled">Draft</span>'
         }
+        <a href="/admin/surveys/${survey.id}/responses" class="btn btn-sm btn-secondary">Responses${survey.response_count > 0 ? ` (${survey.response_count})` : ''}</a>
       </td>
     </tr>
   `).join('');
@@ -1101,6 +1102,301 @@ app.post('/admin/surveys/:id/status', requireAuth, (req, res) => {
     console.error('Error updating status:', error);
     res.status(500).json({ error: 'Failed to update status' });
   }
+});
+
+// Admin responses view
+app.get('/admin/surveys/:id/responses', requireAuth, (req, res) => {
+  const surveyId = req.params.id;
+  const survey = db.getSurvey(surveyId);
+  
+  if (!survey) {
+    return res.status(404).send('Survey not found');
+  }
+  
+  const responses = db.listResponses(surveyId);
+  
+  // Build table headers
+  const headers = survey.questions.map((q, i) => ({
+    id: q.id,
+    text: q.text,
+    position: i + 1
+  }));
+  
+  res.send(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>Responses - ${escapeHtml(survey.title)}</title>
+      <style>
+        * { box-sizing: border-box; }
+        body {
+          font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+          background: #f5f7fa;
+          margin: 0;
+          padding: 0;
+        }
+        .header {
+          background: white;
+          border-bottom: 1px solid #e1e4e8;
+          padding: 16px 24px;
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+        }
+        .header h1 {
+          margin: 0;
+          font-size: 24px;
+          color: #1a1a1a;
+        }
+        .header-actions {
+          display: flex;
+          gap: 12px;
+          align-items: center;
+        }
+        .container {
+          max-width: 1400px;
+          margin: 24px auto;
+          padding: 0 24px;
+        }
+        .breadcrumb {
+          margin-bottom: 16px;
+          color: #666;
+          font-size: 14px;
+        }
+        .breadcrumb a {
+          color: #0969da;
+          text-decoration: none;
+        }
+        .breadcrumb a:hover {
+          text-decoration: underline;
+        }
+        .card {
+          background: white;
+          border-radius: 8px;
+          box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+          overflow: hidden;
+        }
+        .card-header {
+          padding: 20px 24px;
+          border-bottom: 1px solid #e1e4e8;
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+        }
+        .card-header h2 {
+          margin: 0;
+          font-size: 18px;
+          color: #1a1a1a;
+        }
+        .btn {
+          display: inline-block;
+          padding: 8px 16px;
+          border-radius: 6px;
+          text-decoration: none;
+          font-size: 14px;
+          font-weight: 500;
+          cursor: pointer;
+          border: none;
+          transition: all 0.2s;
+        }
+        .btn-primary {
+          background: #2da44e;
+          color: white;
+        }
+        .btn-primary:hover {
+          background: #2c974b;
+        }
+        .btn-secondary {
+          background: #f3f4f6;
+          color: #57606a;
+          border: 1px solid #d0d7de;
+        }
+        .btn-secondary:hover {
+          background: #e5e7eb;
+        }
+        .btn-sm {
+          padding: 6px 12px;
+          font-size: 13px;
+        }
+        .table-container {
+          overflow-x: auto;
+        }
+        table {
+          width: 100%;
+          border-collapse: collapse;
+        }
+        th {
+          background: #f6f8fa;
+          text-align: left;
+          padding: 12px 16px;
+          font-weight: 600;
+          font-size: 13px;
+          color: #57606a;
+          border-bottom: 1px solid #e1e4e8;
+          white-space: nowrap;
+        }
+        td {
+          padding: 12px 16px;
+          border-bottom: 1px solid #e1e4e8;
+          font-size: 14px;
+          max-width: 300px;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        tr:last-child td {
+          border-bottom: none;
+        }
+        tr:hover {
+          background: #f6f8fa;
+        }
+        .empty-state {
+          text-align: center;
+          padding: 60px 24px;
+          color: #666;
+        }
+        .empty-state h3 {
+          margin: 0 0 8px 0;
+          color: #1a1a1a;
+        }
+        .stats {
+          display: inline-block;
+          padding: 2px 8px;
+          background: #f3f4f6;
+          border-radius: 12px;
+          font-size: 13px;
+          color: #666;
+          margin-left: 8px;
+        }
+        .response-id {
+          color: #666;
+          font-size: 13px;
+        }
+        .timestamp {
+          color: #666;
+          font-size: 13px;
+          white-space: nowrap;
+        }
+      </style>
+    </head>
+    <body>
+      <div class="header">
+        <h1>📊 PollPilot</h1>
+        <div class="header-actions">
+          <a href="/admin" class="btn btn-secondary btn-sm">Back to Surveys</a>
+          <a href="/admin/logout" class="btn btn-secondary btn-sm">Logout</a>
+        </div>
+      </div>
+      
+      <div class="container">
+        <div class="breadcrumb">
+          <a href="/admin">← Surveys</a> / 
+          <a href="/admin/surveys/${survey.id}">${escapeHtml(survey.title)}</a> / 
+          Responses
+        </div>
+        
+        <div class="card">
+          <div class="card-header">
+            <h2>
+              Responses
+              <span class="stats">${responses.length} total</span>
+            </h2>
+            ${responses.length > 0 ? `
+              <a href="/admin/surveys/${survey.id}/responses/export" class="btn btn-primary btn-sm">📥 Export CSV</a>
+            ` : ''}
+          </div>
+          
+          ${responses.length > 0 ? `
+            <div class="table-container">
+              <table>
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>Submitted</th>
+                    ${headers.map(h => `<th>Q${h.position}: ${escapeHtml(h.text.substring(0, 50))}${h.text.length > 50 ? '...' : ''}</th>`).join('')}
+                  </tr>
+                </thead>
+                <tbody>
+                  ${responses.map(r => `
+                    <tr>
+                      <td class="response-id">#${r.id}</td>
+                      <td class="timestamp">${formatDate(r.created_at)}</td>
+                      ${headers.map(h => {
+                        const answer = r.answers[h.id] || '-';
+                        const displayAnswer = typeof answer === 'string' ? escapeHtml(answer) : JSON.stringify(answer);
+                        return `<td title="${escapeHtml(displayAnswer)}">${displayAnswer.substring(0, 100)}${displayAnswer.length > 100 ? '...' : ''}</td>`;
+                      }).join('')}
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+          ` : `
+            <div class="empty-state">
+              <h3>No responses yet</h3>
+              <p>Responses will appear here once people start filling out your survey.</p>
+              ${survey.status === 'draft' ? `
+                <p style="margin-top: 16px;">
+                  <a href="/admin/surveys/${survey.id}" class="btn btn-primary btn-sm">Publish Survey</a>
+                </p>
+              ` : ''}
+            </div>
+          `}
+        </div>
+      </div>
+    </body>
+    </html>
+  `);
+});
+
+// CSV export endpoint
+app.get('/admin/surveys/:id/responses/export', requireAuth, (req, res) => {
+  const surveyId = req.params.id;
+  const survey = db.getSurvey(surveyId);
+  
+  if (!survey) {
+    return res.status(404).send('Survey not found');
+  }
+  
+  const responses = db.listResponses(surveyId);
+  
+  // Build CSV header
+  const headers = ['Response ID', 'Submitted At'];
+  survey.questions.forEach((q, i) => {
+    headers.push(`Q${i + 1}: ${q.text}`);
+  });
+  
+  // Build CSV rows
+  const rows = [headers];
+  responses.forEach(r => {
+    const row = [r.id, r.created_at];
+    survey.questions.forEach(q => {
+      const answer = r.answers[q.id];
+      // Handle different answer types
+      let cellValue = '';
+      if (answer !== undefined && answer !== null) {
+        if (typeof answer === 'object') {
+          cellValue = JSON.stringify(answer);
+        } else {
+          cellValue = String(answer);
+        }
+        // Escape quotes for CSV
+        cellValue = cellValue.replace(/"/g, '""');
+      }
+      row.push(`"${cellValue}"`);
+    });
+    rows.push(row);
+  });
+  
+  // Convert to CSV string
+  const csv = rows.map(row => row.join(',')).join('\n');
+  
+  // Send as downloadable file
+  const filename = `${survey.slug}-responses-${new Date().toISOString().split('T')[0]}.csv`;
+  res.setHeader('Content-Type', 'text/csv');
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  res.send(csv);
 });
 
 // Health check endpoint
