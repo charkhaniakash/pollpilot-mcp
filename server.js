@@ -1404,8 +1404,47 @@ app.get('/health', (req, res) => {
   res.json({ ok: true });
 });
 
-// MCP endpoint using Streamable HTTP
-app.post('/mcp', async (req, res) => {
+// MCP authentication middleware
+function validateMCPToken(req, res, next) {
+  const requiredToken = process.env.MCP_TOKEN;
+  
+  // If no token is configured, allow access (development mode)
+  if (!requiredToken) {
+    console.warn('[MCP] Warning: MCP_TOKEN not set. Endpoint is unprotected.');
+    return next();
+  }
+  
+  // Check for token in path (e.g., /mcp/SECRET_TOKEN)
+  const pathToken = req.params.token;
+  
+  // Check for token in Authorization header
+  const authHeader = req.headers.authorization;
+  let headerToken = null;
+  if (authHeader) {
+    const match = authHeader.match(/^Bearer\s+(.+)$/i);
+    if (match) {
+      headerToken = match[1];
+    }
+  }
+  
+  // Validate token
+  if (pathToken === requiredToken || headerToken === requiredToken) {
+    return next();
+  }
+  
+  // Unauthorized
+  return res.status(401).json({
+    jsonrpc: '2.0',
+    error: {
+      code: -32001,
+      message: 'Unauthorized. Valid MCP_TOKEN required.'
+    },
+    id: null
+  });
+}
+
+// MCP handler function
+async function handleMCPRequest(req, res) {
   const server = createMCPServer();
   
   try {
@@ -1433,6 +1472,21 @@ app.post('/mcp', async (req, res) => {
       });
     }
   }
+}
+
+// MCP endpoints - token in path takes precedence
+app.post('/mcp/:token', validateMCPToken, handleMCPRequest);
+app.post('/mcp', validateMCPToken, handleMCPRequest);
+
+app.get('/mcp/:token', (req, res) => {
+  res.status(405).json({
+    jsonrpc: '2.0',
+    error: {
+      code: -32000,
+      message: 'Method not allowed. Use POST for MCP requests.'
+    },
+    id: null
+  });
 });
 
 app.get('/mcp', (req, res) => {
