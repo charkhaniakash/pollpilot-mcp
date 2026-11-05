@@ -481,6 +481,628 @@ function formatDate(dateStr) {
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
+// Admin survey editor page
+app.get('/admin/surveys/:id', requireAuth, (req, res) => {
+  const surveyId = req.params.id;
+  const survey = db.getSurvey(surveyId);
+  
+  if (!survey) {
+    return res.status(404).send('Survey not found');
+  }
+  
+  const baseUrl = process.env.BASE_URL || `http://localhost:${process.env.PORT || 3000}`;
+  
+  // Server-side function to render a question
+  function renderQuestionHTML(q, index) {
+    let optionsHTML = '';
+    if (q.type === 'choice') {
+      const opts = q.options || [];
+      const optsStr = Array.isArray(opts) ? opts.join(', ') : '';
+      optionsHTML = `
+        <div class="question-options">
+          <label style="font-size: 13px;">Choice Options (comma-separated)</label>
+          <input type="text" class="q-options" value="${escapeHtml(optsStr)}" placeholder="Option 1, Option 2, Option 3">
+        </div>
+      `;
+    } else if (q.type === 'rating') {
+      const min = q.options?.min || 1;
+      const max = q.options?.max || 5;
+      optionsHTML = `
+        <div class="question-options">
+          <label style="font-size: 13px;">Rating Range</label>
+          <input type="number" class="q-min small-input" value="${min}" min="1" max="10" placeholder="Min">
+          to
+          <input type="number" class="q-max small-input" value="${max}" min="1" max="10" placeholder="Max">
+        </div>
+      `;
+    }
+    
+    return `
+      <div class="question-item" data-index="${index}">
+        <div class="question-header">
+          <span class="question-number">Question ${index + 1}</span>
+          <button type="button" class="btn btn-danger btn-sm" onclick="removeQuestion(${index})">Delete</button>
+        </div>
+        
+        <div class="form-group">
+          <input type="text" class="q-text" value="${escapeHtml(q.text)}" placeholder="Enter question text" required>
+        </div>
+        
+        <div class="form-group">
+          <label style="font-size: 13px;">Question Type</label>
+          <select class="q-type" onchange="updateQuestionType(${index}, this.value)">
+            <option value="text" ${q.type === 'text' ? 'selected' : ''}>Text</option>
+            <option value="choice" ${q.type === 'choice' ? 'selected' : ''}>Multiple Choice</option>
+            <option value="rating" ${q.type === 'rating' ? 'selected' : ''}>Rating</option>
+          </select>
+        </div>
+        
+        <div class="options-container">${optionsHTML}</div>
+      </div>
+    `;
+  }
+  
+  res.send(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>Edit Survey - PollPilot Admin</title>
+      <style>
+        * { box-sizing: border-box; }
+        body {
+          font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+          background: #f5f7fa;
+          margin: 0;
+          padding: 0;
+        }
+        .header {
+          background: white;
+          border-bottom: 1px solid #e1e4e8;
+          padding: 16px 24px;
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+        }
+        .header h1 {
+          margin: 0;
+          font-size: 24px;
+          color: #1a1a1a;
+        }
+        .header-actions {
+          display: flex;
+          gap: 12px;
+          align-items: center;
+        }
+        .container {
+          max-width: 900px;
+          margin: 24px auto;
+          padding: 0 24px;
+        }
+        .breadcrumb {
+          margin-bottom: 16px;
+          color: #666;
+          font-size: 14px;
+        }
+        .breadcrumb a {
+          color: #0969da;
+          text-decoration: none;
+        }
+        .breadcrumb a:hover {
+          text-decoration: underline;
+        }
+        .card {
+          background: white;
+          border-radius: 8px;
+          box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+          padding: 24px;
+          margin-bottom: 20px;
+        }
+        .card h2 {
+          margin: 0 0 20px 0;
+          font-size: 18px;
+          color: #1a1a1a;
+        }
+        .form-group {
+          margin-bottom: 20px;
+        }
+        label {
+          display: block;
+          font-weight: 600;
+          margin-bottom: 8px;
+          color: #333;
+          font-size: 14px;
+        }
+        input[type="text"],
+        textarea {
+          width: 100%;
+          padding: 10px 12px;
+          border: 1px solid #d0d7de;
+          border-radius: 6px;
+          font-family: inherit;
+          font-size: 14px;
+        }
+        input:focus,
+        textarea:focus {
+          outline: none;
+          border-color: #0969da;
+          box-shadow: 0 0 0 3px rgba(9, 105, 218, 0.1);
+        }
+        textarea {
+          resize: vertical;
+        }
+        .question-item {
+          background: #f6f8fa;
+          border: 1px solid #d0d7de;
+          border-radius: 6px;
+          padding: 16px;
+          margin-bottom: 12px;
+        }
+        .question-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 12px;
+        }
+        .question-number {
+          font-weight: 600;
+          color: #666;
+        }
+        select {
+          padding: 6px 30px 6px 10px;
+          border: 1px solid #d0d7de;
+          border-radius: 6px;
+          font-size: 14px;
+          background: white;
+          cursor: pointer;
+        }
+        .question-options {
+          margin-top: 12px;
+          padding: 12px;
+          background: white;
+          border-radius: 4px;
+          border: 1px solid #d0d7de;
+        }
+        .option-input {
+          margin-bottom: 8px;
+        }
+        .btn {
+          display: inline-block;
+          padding: 8px 16px;
+          border-radius: 6px;
+          text-decoration: none;
+          font-size: 14px;
+          font-weight: 500;
+          cursor: pointer;
+          border: none;
+          transition: all 0.2s;
+        }
+        .btn-primary {
+          background: #2da44e;
+          color: white;
+        }
+        .btn-primary:hover {
+          background: #2c974b;
+        }
+        .btn-secondary {
+          background: #f3f4f6;
+          color: #57606a;
+          border: 1px solid #d0d7de;
+        }
+        .btn-secondary:hover {
+          background: #e5e7eb;
+        }
+        .btn-danger {
+          background: #d73a49;
+          color: white;
+        }
+        .btn-danger:hover {
+          background: #cb2431;
+        }
+        .btn-sm {
+          padding: 4px 10px;
+          font-size: 13px;
+        }
+        .btn-add {
+          width: 100%;
+          margin-top: 12px;
+          background: white;
+          border: 1px dashed #d0d7de;
+          color: #0969da;
+        }
+        .btn-add:hover {
+          background: #f6f8fa;
+          border-color: #0969da;
+        }
+        .status-toggle {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          padding: 16px;
+          background: #fff8e1;
+          border: 1px solid #ffd54f;
+          border-radius: 6px;
+          margin-bottom: 20px;
+        }
+        .status-toggle.published {
+          background: #d1fae5;
+          border-color: #10b981;
+        }
+        .toggle-switch {
+          position: relative;
+          width: 50px;
+          height: 26px;
+          background: #ccc;
+          border-radius: 13px;
+          cursor: pointer;
+          transition: background 0.3s;
+        }
+        .toggle-switch.active {
+          background: #2da44e;
+        }
+        .toggle-switch::after {
+          content: '';
+          position: absolute;
+          top: 3px;
+          left: 3px;
+          width: 20px;
+          height: 20px;
+          background: white;
+          border-radius: 50%;
+          transition: transform 0.3s;
+        }
+        .toggle-switch.active::after {
+          transform: translateX(24px);
+        }
+        .actions {
+          display: flex;
+          gap: 12px;
+          padding-top: 20px;
+          border-top: 1px solid #e1e4e8;
+        }
+        .alert {
+          padding: 12px 16px;
+          border-radius: 6px;
+          margin-bottom: 20px;
+          font-size: 14px;
+        }
+        .alert-success {
+          background: #d1fae5;
+          border: 1px solid #10b981;
+          color: #065f46;
+        }
+        .alert-error {
+          background: #fee;
+          border: 1px solid #d73a49;
+          color: #c33;
+        }
+        .small-input {
+          width: 80px;
+          display: inline-block;
+          margin: 0 4px;
+        }
+      </style>
+    </head>
+    <body>
+      <div class="header">
+        <h1>📊 PollPilot</h1>
+        <div class="header-actions">
+          <a href="/admin" class="btn btn-secondary btn-sm">Back to Surveys</a>
+          <a href="/admin/logout" class="btn btn-secondary btn-sm">Logout</a>
+        </div>
+      </div>
+      
+      <div class="container">
+        <div class="breadcrumb">
+          <a href="/admin">← Surveys</a> / Edit Survey
+        </div>
+        
+        <div id="alert" style="display: none;" class="alert"></div>
+        
+        <div class="status-toggle ${survey.status === 'published' ? 'published' : ''}">
+          <div class="toggle-switch ${survey.status === 'published' ? 'active' : ''}" id="statusToggle" onclick="toggleStatus()"></div>
+          <div>
+            <strong id="statusText">${survey.status === 'published' ? 'Published' : 'Draft'}</strong>
+            <div style="font-size: 13px; color: #666;">
+              ${survey.status === 'published' 
+                ? `Public link: <a href="${baseUrl}/s/${survey.slug}" target="_blank">${baseUrl}/s/${survey.slug}</a>` 
+                : 'Survey is not visible to the public'}
+            </div>
+          </div>
+        </div>
+        
+        <form id="surveyForm">
+          <div class="card">
+            <h2>Survey Details</h2>
+            
+            <div class="form-group">
+              <label for="title">Title</label>
+              <input type="text" id="title" name="title" value="${escapeHtml(survey.title)}" required>
+            </div>
+            
+            <div class="form-group">
+              <label for="description">Description (optional)</label>
+              <textarea id="description" name="description" rows="3">${escapeHtml(survey.description || '')}</textarea>
+            </div>
+          </div>
+          
+          <div class="card">
+            <h2>Questions</h2>
+            
+            <div id="questionsList">
+              ${survey.questions.map((q, index) => renderQuestionHTML(q, index)).join('')}
+            </div>
+            
+            <button type="button" class="btn btn-add" onclick="addQuestion()">+ Add Question</button>
+          </div>
+          
+          <div class="actions">
+            <button type="submit" class="btn btn-primary">Save Changes</button>
+            <a href="/admin" class="btn btn-secondary">Cancel</a>
+          </div>
+        </form>
+      </div>
+      
+      <script>
+        const surveyId = ${survey.id};
+        let currentStatus = '${survey.status}';
+        let questionCounter = ${survey.questions.length};
+        
+        function renderQuestion(question, index) {
+          const types = ['text', 'choice', 'rating'];
+          const type = question.type || 'text';
+          
+          let optionsHtml = '';
+          if (type === 'choice') {
+            const opts = question.options || [];
+            const optsStr = Array.isArray(opts) ? opts.join(', ') : '';
+            optionsHtml = \`
+              <div class="question-options">
+                <label style="font-size: 13px;">Choice Options (comma-separated)</label>
+                <input type="text" class="q-options" value="\${escapeHtml(optsStr)}" placeholder="Option 1, Option 2, Option 3">
+              </div>
+            \`;
+          } else if (type === 'rating') {
+            const min = question.options?.min || 1;
+            const max = question.options?.max || 5;
+            optionsHtml = \`
+              <div class="question-options">
+                <label style="font-size: 13px;">Rating Range</label>
+                <input type="number" class="q-min small-input" value="\${min}" min="1" max="10" placeholder="Min">
+                to
+                <input type="number" class="q-max small-input" value="\${max}" min="1" max="10" placeholder="Max">
+              </div>
+            \`;
+          }
+          
+          return \`
+            <div class="question-item" data-index="\${index}">
+              <div class="question-header">
+                <span class="question-number">Question \${index + 1}</span>
+                <button type="button" class="btn btn-danger btn-sm" onclick="removeQuestion(\${index})">Delete</button>
+              </div>
+              
+              <div class="form-group">
+                <input type="text" class="q-text" value="\${escapeHtml(question.text)}" placeholder="Enter question text" required>
+              </div>
+              
+              <div class="form-group">
+                <label style="font-size: 13px;">Question Type</label>
+                <select class="q-type" onchange="updateQuestionType(\${index}, this.value)">
+                  <option value="text" \${type === 'text' ? 'selected' : ''}>Text</option>
+                  <option value="choice" \${type === 'choice' ? 'selected' : ''}>Multiple Choice</option>
+                  <option value="rating" \${type === 'rating' ? 'selected' : ''}>Rating</option>
+                </select>
+              </div>
+              
+              <div class="options-container">\${optionsHtml}</div>
+            </div>
+          \`;
+        }
+        
+        function escapeHtml(text) {
+          const div = document.createElement('div');
+          div.textContent = text;
+          return div.innerHTML;
+        }
+        
+        function loadQuestions() {
+          const questions = ${JSON.stringify(survey.questions)};
+          const container = document.getElementById('questionsList');
+          container.innerHTML = questions.map((q, i) => renderQuestion(q, i)).join('');
+        }
+        
+        function addQuestion() {
+          const container = document.getElementById('questionsList');
+          const newQuestion = {
+            text: '',
+            type: 'text',
+            options: null
+          };
+          container.insertAdjacentHTML('beforeend', renderQuestion(newQuestion, questionCounter));
+          questionCounter++;
+        }
+        
+        function removeQuestion(index) {
+          const items = document.querySelectorAll('.question-item');
+          if (items.length <= 1) {
+            showAlert('error', 'Survey must have at least one question');
+            return;
+          }
+          items[index].remove();
+          renumberQuestions();
+        }
+        
+        function renumberQuestions() {
+          document.querySelectorAll('.question-item').forEach((item, index) => {
+            item.dataset.index = index;
+            item.querySelector('.question-number').textContent = \`Question \${index + 1}\`;
+          });
+        }
+        
+        function updateQuestionType(index, type) {
+          const item = document.querySelectorAll('.question-item')[index];
+          const container = item.querySelector('.options-container');
+          
+          if (type === 'choice') {
+            container.innerHTML = \`
+              <div class="question-options">
+                <label style="font-size: 13px;">Choice Options (comma-separated)</label>
+                <input type="text" class="q-options" placeholder="Option 1, Option 2, Option 3">
+              </div>
+            \`;
+          } else if (type === 'rating') {
+            container.innerHTML = \`
+              <div class="question-options">
+                <label style="font-size: 13px;">Rating Range</label>
+                <input type="number" class="q-min small-input" value="1" min="1" max="10" placeholder="Min">
+                to
+                <input type="number" class="q-max small-input" value="5" min="1" max="10" placeholder="Max">
+              </div>
+            \`;
+          } else {
+            container.innerHTML = '';
+          }
+        }
+        
+        async function toggleStatus() {
+          const newStatus = currentStatus === 'draft' ? 'published' : 'draft';
+          
+          try {
+            const response = await fetch(\`/admin/surveys/\${surveyId}/status\`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ status: newStatus })
+            });
+            
+            if (response.ok) {
+              currentStatus = newStatus;
+              const toggle = document.getElementById('statusToggle');
+              const statusText = document.getElementById('statusText');
+              const container = toggle.closest('.status-toggle');
+              
+              if (newStatus === 'published') {
+                toggle.classList.add('active');
+                container.classList.add('published');
+                statusText.textContent = 'Published';
+              } else {
+                toggle.classList.remove('active');
+                container.classList.remove('published');
+                statusText.textContent = 'Draft';
+              }
+              
+              showAlert('success', \`Survey \${newStatus === 'published' ? 'published' : 'unpublished'} successfully\`);
+              setTimeout(() => location.reload(), 1000);
+            } else {
+              showAlert('error', 'Failed to update status');
+            }
+          } catch (error) {
+            showAlert('error', 'Network error');
+          }
+        }
+        
+        document.getElementById('surveyForm').addEventListener('submit', async (e) => {
+          e.preventDefault();
+          
+          const title = document.getElementById('title').value.trim();
+          const description = document.getElementById('description').value.trim();
+          
+          const questions = [];
+          document.querySelectorAll('.question-item').forEach((item) => {
+            const text = item.querySelector('.q-text').value.trim();
+            const type = item.querySelector('.q-type').value;
+            
+            let options = null;
+            if (type === 'choice') {
+              const optInput = item.querySelector('.q-options');
+              if (optInput && optInput.value) {
+                options = optInput.value.split(',').map(s => s.trim()).filter(s => s);
+              }
+            } else if (type === 'rating') {
+              const minInput = item.querySelector('.q-min');
+              const maxInput = item.querySelector('.q-max');
+              if (minInput && maxInput) {
+                options = {
+                  min: parseInt(minInput.value) || 1,
+                  max: parseInt(maxInput.value) || 5
+                };
+              }
+            }
+            
+            questions.push({ text, type, options });
+          });
+          
+          if (questions.some(q => !q.text)) {
+            showAlert('error', 'Please fill in all question texts');
+            return;
+          }
+          
+          try {
+            const response = await fetch(\`/admin/surveys/\${surveyId}\`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ title, description, questions })
+            });
+            
+            const result = await response.json();
+            
+            if (response.ok) {
+              showAlert('success', 'Survey updated successfully');
+              setTimeout(() => window.location.href = '/admin', 1500);
+            } else {
+              showAlert('error', result.error || 'Failed to update survey');
+            }
+          } catch (error) {
+            showAlert('error', 'Network error');
+          }
+        });
+        
+        function showAlert(type, message) {
+          const alert = document.getElementById('alert');
+          alert.className = \`alert alert-\${type}\`;
+          alert.textContent = message;
+          alert.style.display = 'block';
+          setTimeout(() => alert.style.display = 'none', 5000);
+        }
+      </script>
+    </body>
+    </html>
+  `);
+});
+
+// Update survey endpoint
+app.post('/admin/surveys/:id', requireAuth, (req, res) => {
+  const surveyId = req.params.id;
+  const { title, description, questions } = req.body;
+  
+  try {
+    db.updateSurvey(surveyId, { title, description, questions });
+    res.json({ success: true, message: 'Survey updated successfully' });
+  } catch (error) {
+    console.error('Error updating survey:', error);
+    res.status(500).json({ error: 'Failed to update survey' });
+  }
+});
+
+// Toggle survey status endpoint
+app.post('/admin/surveys/:id/status', requireAuth, (req, res) => {
+  const surveyId = req.params.id;
+  const { status } = req.body;
+  
+  if (!['draft', 'published'].includes(status)) {
+    return res.status(400).json({ error: 'Invalid status' });
+  }
+  
+  try {
+    db.updateSurvey(surveyId, { status });
+    res.json({ success: true, message: 'Status updated successfully' });
+  } catch (error) {
+    console.error('Error updating status:', error);
+    res.status(500).json({ error: 'Failed to update status' });
+  }
+});
+
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.json({ ok: true });
