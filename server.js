@@ -202,28 +202,284 @@ app.get('/admin/logout', (req, res) => {
   });
 });
 
-// Protected admin routes (placeholder for F8)
+// Protected admin routes - Survey list
 app.get('/admin', requireAuth, (req, res) => {
+  const surveys = db.listSurveys();
+  const baseUrl = process.env.BASE_URL || `http://localhost:${process.env.PORT || 3000}`;
+  
+  const surveyRows = surveys.map(survey => `
+    <tr>
+      <td class="title-cell">
+        <a href="/admin/surveys/${survey.id}" class="survey-title">${escapeHtml(survey.title)}</a>
+        <div class="survey-meta">${escapeHtml(survey.slug)}</div>
+      </td>
+      <td>
+        <span class="status-badge status-${survey.status}">${survey.status}</span>
+      </td>
+      <td class="center">${survey.response_count}</td>
+      <td class="date-cell">${formatDate(survey.created_at)}</td>
+      <td class="actions-cell">
+        <a href="/admin/surveys/${survey.id}" class="btn btn-sm btn-primary">Edit</a>
+        ${survey.status === 'published' ? 
+          `<a href="${baseUrl}/s/${survey.slug}" target="_blank" class="btn btn-sm btn-secondary">View</a>` : 
+          '<span class="btn btn-sm btn-disabled">Draft</span>'
+        }
+      </td>
+    </tr>
+  `).join('');
+  
   res.send(`
     <!DOCTYPE html>
     <html>
     <head>
       <meta charset="UTF-8">
-      <title>Admin - PollPilot</title>
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>Surveys - PollPilot Admin</title>
       <style>
-        body { font-family: sans-serif; max-width: 800px; margin: 50px auto; padding: 20px; }
-        h1 { color: #333; }
-        a { color: #667eea; text-decoration: none; }
+        * { box-sizing: border-box; }
+        body {
+          font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+          background: #f5f7fa;
+          margin: 0;
+          padding: 0;
+        }
+        .header {
+          background: white;
+          border-bottom: 1px solid #e1e4e8;
+          padding: 16px 24px;
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+        }
+        .header h1 {
+          margin: 0;
+          font-size: 24px;
+          color: #1a1a1a;
+        }
+        .header-actions {
+          display: flex;
+          gap: 12px;
+          align-items: center;
+        }
+        .user-info {
+          color: #666;
+          font-size: 14px;
+        }
+        .container {
+          max-width: 1200px;
+          margin: 24px auto;
+          padding: 0 24px;
+        }
+        .card {
+          background: white;
+          border-radius: 8px;
+          box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+          overflow: hidden;
+        }
+        .card-header {
+          padding: 20px 24px;
+          border-bottom: 1px solid #e1e4e8;
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+        }
+        .card-header h2 {
+          margin: 0;
+          font-size: 18px;
+          color: #1a1a1a;
+        }
+        table {
+          width: 100%;
+          border-collapse: collapse;
+        }
+        th {
+          background: #f6f8fa;
+          text-align: left;
+          padding: 12px 24px;
+          font-weight: 600;
+          font-size: 14px;
+          color: #57606a;
+          border-bottom: 1px solid #e1e4e8;
+        }
+        td {
+          padding: 16px 24px;
+          border-bottom: 1px solid #e1e4e8;
+          font-size: 14px;
+        }
+        tr:last-child td {
+          border-bottom: none;
+        }
+        tr:hover {
+          background: #f6f8fa;
+        }
+        .title-cell {
+          max-width: 400px;
+        }
+        .survey-title {
+          color: #0969da;
+          text-decoration: none;
+          font-weight: 500;
+          display: block;
+          margin-bottom: 4px;
+        }
+        .survey-title:hover {
+          text-decoration: underline;
+        }
+        .survey-meta {
+          color: #666;
+          font-size: 12px;
+        }
+        .status-badge {
+          display: inline-block;
+          padding: 4px 12px;
+          border-radius: 12px;
+          font-size: 12px;
+          font-weight: 600;
+          text-transform: uppercase;
+        }
+        .status-draft {
+          background: #f3f4f6;
+          color: #6b7280;
+        }
+        .status-published {
+          background: #d1fae5;
+          color: #065f46;
+        }
+        .center {
+          text-align: center;
+        }
+        .date-cell {
+          color: #666;
+          white-space: nowrap;
+        }
+        .actions-cell {
+          white-space: nowrap;
+        }
+        .btn {
+          display: inline-block;
+          padding: 6px 12px;
+          border-radius: 6px;
+          text-decoration: none;
+          font-size: 13px;
+          font-weight: 500;
+          cursor: pointer;
+          border: none;
+          transition: all 0.2s;
+        }
+        .btn-sm {
+          padding: 4px 10px;
+          font-size: 12px;
+        }
+        .btn-primary {
+          background: #0969da;
+          color: white;
+        }
+        .btn-primary:hover {
+          background: #0550ae;
+        }
+        .btn-secondary {
+          background: #f3f4f6;
+          color: #57606a;
+        }
+        .btn-secondary:hover {
+          background: #e5e7eb;
+        }
+        .btn-disabled {
+          background: #f3f4f6;
+          color: #9ca3af;
+          cursor: not-allowed;
+        }
+        .btn-logout {
+          background: transparent;
+          color: #d73a49;
+          border: 1px solid #d73a49;
+        }
+        .btn-logout:hover {
+          background: #d73a49;
+          color: white;
+        }
+        .empty-state {
+          text-align: center;
+          padding: 60px 24px;
+          color: #666;
+        }
+        .empty-state h3 {
+          margin: 0 0 8px 0;
+          color: #1a1a1a;
+        }
+        .stats {
+          display: inline-block;
+          padding: 2px 8px;
+          background: #f3f4f6;
+          border-radius: 12px;
+          font-size: 13px;
+          color: #666;
+          margin-left: 8px;
+        }
       </style>
     </head>
     <body>
-      <h1>Welcome, ${req.session.username}!</h1>
-      <p>This is the admin dashboard. Survey list will be implemented in F8.</p>
-      <a href="/admin/logout">Logout</a>
+      <div class="header">
+        <h1>📊 PollPilot</h1>
+        <div class="header-actions">
+          <span class="user-info">👤 ${escapeHtml(req.session.username)}</span>
+          <a href="/admin/logout" class="btn btn-sm btn-logout">Logout</a>
+        </div>
+      </div>
+      
+      <div class="container">
+        <div class="card">
+          <div class="card-header">
+            <h2>
+              Surveys
+              <span class="stats">${surveys.length} total</span>
+            </h2>
+          </div>
+          
+          ${surveys.length > 0 ? `
+            <table>
+              <thead>
+                <tr>
+                  <th>Survey</th>
+                  <th>Status</th>
+                  <th class="center">Responses</th>
+                  <th>Created</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${surveyRows}
+              </tbody>
+            </table>
+          ` : `
+            <div class="empty-state">
+              <h3>No surveys yet</h3>
+              <p>Create your first survey using Claude with the MCP tool.</p>
+            </div>
+          `}
+        </div>
+      </div>
     </body>
     </html>
   `);
 });
+
+// Helper function to format dates
+function formatDate(dateStr) {
+  const date = new Date(dateStr);
+  const now = new Date();
+  const diffMs = now - date;
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMs / 3600000);
+  const diffDays = Math.floor(diffMs / 86400000);
+  
+  if (diffMins < 1) return 'Just now';
+  if (diffMins < 60) return `${diffMins}m ago`;
+  if (diffHours < 24) return `${diffHours}h ago`;
+  if (diffDays < 7) return `${diffDays}d ago`;
+  
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
 
 // Health check endpoint
 app.get('/health', (req, res) => {
